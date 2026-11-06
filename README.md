@@ -17,7 +17,10 @@
 Settings → Environment Variables bölümüne şunları ekleyin:
 - `APP_PASSWORD` : ekibin giriş şifresi (uzun ve tahmin edilmesi zor olsun)
 - `RESEND_API_KEY` : Resend hesabınızdaki API anahtarı
+- `CRON_SECRET` : günlük yedek cron isteğini doğrulamak için en az 16 karakterlik rastgele bir gizli değer
 - `RAPOR_FROM` (isteğe bağlı) : kendi alan adınızı Resend'de doğruladıysanız "Firma <rapor@alanadiniz.com>"
+
+Her gün saat 09:00 Türkiye saatiyle, veritabanındaki kayıtlar JSON yedeğine dönüştürülerek `hakankaraoglu@gmail.com` adresine e-posta eki olarak gönderilir. Zamanlama Vercel cron'unda UTC 06:00 olarak ayarlanmıştır. Bu adres Resend hesabının izin verilen alıcılarından biri değilse, `RAPOR_FROM` için Resend'de doğrulanmış bir alan adı kullanın.
 
 ## 5. Yeniden yayınlama
 Deployments sekmesinde son yayının ⋯ menüsünden **Redeploy** deyin. Sonra size verilen adresi açın, şifreyle girin.
