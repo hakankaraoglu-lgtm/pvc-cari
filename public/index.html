@@ -84,7 +84,7 @@ const tar=d=>d?d.split('-').reverse().join('.'):'';
 const gunFark=d=>Math.floor((Date.parse(bugun())-Date.parse(d))/864e5);
 const COLS=['cari','fatura','hareket','urun','cek','stok','teklif','ayar'];
 const YONT_H=['Nakit','Banka R','Banka GR','Havale/EFT','Kredi kartı'],YONT=[...YONT_H,'Çek','Senet'];
-let S={cari:[],fatura:[],hareket:[],urun:[],cek:[],stok:[],teklif:[],ayar:[]},tab='ozet',ara='',fy='',DB=null,AS=null;
+let S={cari:[],fatura:[],hareket:[],urun:[],cek:[],stok:[],teklif:[],ayar:[]},tab='ozet',ara='',fy='',ff='tumu',DB=null,AS=null;
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 function lsave(){if(DB)return;try{localStorage.setItem('pvc_cari',JSON.stringify(S))}catch(e){}}
 function put(c,o){const i=S[c].findIndex(x=>x.id===o.id);i<0?S[c].push(o):S[c][i]=o;if(DB)DB.collection(c).doc(o.id).set(o).catch(()=>alert('Kayıt yapılamadı. Yazma yetkiniz olmayabilir.'));else lsave();}
@@ -98,12 +98,15 @@ async function baslat(){
  render();}
 function yerelAktar(){try{const o=JSON.parse(localStorage.getItem('pvc_cari'));COLS.forEach(c=>(o[c]||[]).forEach(x=>put(c,x)));localStorage.removeItem('pvc_cari');$('#ya').hidden=true;alert('Eski veriler ortak veri tabanına aktarıldı.')}catch(e){alert('Aktarım yapılamadı.')}}
 const cAd=id=>(S.cari.find(c=>c.id===id)||{ad:'— Genel —'}).ad;
-function bakiye(id){let b=0;S.fatura.filter(f=>f.cari===id).forEach(f=>b+=f.toplam);S.hareket.filter(h=>h.cari===id).forEach(h=>b+=h.tip==='giris'?-h.tutar:h.tutar);return b;}
-function fifo(cid){let o=S.hareket.filter(h=>h.cari===cid).reduce((a,h)=>a+(h.tip==='giris'?h.tutar:-h.tutar),0);const m={};
- S.fatura.filter(f=>f.cari===cid).sort((a,b)=>a.tarih.localeCompare(b.tarih)).forEach(f=>{const u=Math.max(0,Math.min(f.toplam,o));o-=u;m[f.id]=f.toplam-u});return m;}
-function kalanlar(){const m={};S.cari.forEach(c=>Object.assign(m,fifo(c.id)));return m;}
+function faturaTip(f){return f.tip==='alis'?'alis':'satis'}
+function faturaTuru(f){return faturaTip(f)==='alis'?'Alış':'Satış'}
+function faturaNo(tip='satis'){const p=tip==='alis'?'A':'F',n=S.fatura.filter(f=>faturaTip(f)===tip).length+1;return p+'-'+new Date().getFullYear()+'-'+String(n).padStart(4,'0');}
+function bakiye(id){let b=0;S.fatura.filter(f=>f.cari===id).forEach(f=>b+=f.toplam*(faturaTip(f)==='alis'?-1:1));S.hareket.filter(h=>h.cari===id).forEach(h=>b+=h.tip==='giris'?-h.tutar:h.tutar);return b;}
+function fifo(cid,tip){const htip=tip==='alis'?'cikis':'giris';let o=S.hareket.filter(h=>h.cari===cid&&h.tip===htip).reduce((a,h)=>a+h.tutar,0);const m={};
+ S.fatura.filter(f=>f.cari===cid&&faturaTip(f)===tip).sort((a,b)=>a.tarih.localeCompare(b.tarih)).forEach(f=>{const u=Math.max(0,Math.min(f.toplam,o));o-=u;m[f.id]=f.toplam-u});return m;}
+function kalanlar(){const m={};S.cari.forEach(c=>Object.assign(m,fifo(c.id,'satis'),fifo(c.id,'alis')));return m;}
 function geciken(){const K=kalanlar();return S.fatura.filter(f=>f.vade&&f.vade<bugun()&&K[f.id]>0.005).map(f=>({f,k:K[f.id],g:gunFark(f.vade)})).sort((a,b)=>b.g-a.g);}
-function ekstre(id){const r=[];S.fatura.filter(f=>f.cari===id).forEach(f=>r.push({t:f.tarih,a:'Fatura '+f.no,b:f.toplam,fid:f.id}));
+function ekstre(id){const r=[];S.fatura.filter(f=>f.cari===id).forEach(f=>r.push({t:f.tarih,a:faturaTuru(f)+' faturası '+f.no,b:f.toplam*(faturaTip(f)==='alis'?-1:1),fid:f.id}));
  S.hareket.filter(h=>h.cari===id).forEach(h=>r.push({t:h.tarih,a:(h.tip==='giris'?'Tahsilat':'Ödeme/İade')+' ('+h.yontem+')'+(h.aciklama?' – '+h.aciklama:''),b:h.tip==='giris'?-h.tutar:h.tutar}));
  r.sort((x,y)=>x.t.localeCompare(y.t));let k=0;r.forEach(x=>{k+=x.b;x.k=k});return r;}
 const tabs=[['ozet','Özet'],['cari','Cariler'],['fatura','Faturalar'],['teklif','Teklif / Sipariş'],['kasa','Tahsilat / Ödeme'],['cek','Çek / Senet'],['urun','Ürün / Stok'],['akis','Nakit akışı']];
@@ -111,23 +114,28 @@ function render(){$('#nav').innerHTML=tabs.map(([k,l])=>`<button class="${k===ta
  $('#app').innerHTML=({ozet,cari,fatura,teklif,kasa,cek,urun,akis})[tab]();}
 function ozet(){
  const gi=S.hareket.filter(h=>h.tip==='giris').reduce((a,h)=>a+h.tutar,0),cik=S.hareket.filter(h=>h.tip==='cikis').reduce((a,h)=>a+h.tutar,0);
- const alac=S.cari.reduce((a,c)=>a+Math.max(0,bakiye(c.id)),0),G=geciken(),gt=G.reduce((a,x)=>a+x.k,0);
+ const K=kalanlar(),alac=S.fatura.filter(f=>faturaTip(f)==='satis').reduce((a,f)=>a+(K[f.id]||0),0),borc=S.fatura.filter(f=>faturaTip(f)==='alis').reduce((a,f)=>a+(K[f.id]||0),0),G=geciken();
+ const gtAlac=G.filter(x=>faturaTip(x.f)==='satis').reduce((a,x)=>a+x.k,0),gtBorc=G.filter(x=>faturaTip(x.f)==='alis').reduce((a,x)=>a+x.k,0);
  const cp=S.cek.filter(c=>c.durum==='Portföyde'),d7=gunEkle(7),yak=cp.filter(c=>c.vade<=d7).sort((a,b)=>a.vade.localeCompare(b.vade));
  return `<div class="grid"><div class="box"><small>Toplam alacak</small><b>${TL(alac)}</b></div>
- <div class="box"><small>Vadesi geçmiş alacak</small><b class="${gt?'out':''}">${TL(gt)}</b></div>
+ <div class="box"><small>Toplam borç</small><b>${TL(borc)}</b></div>
+ <div class="box"><small>Vadesi geçmiş alacak</small><b class="${gtAlac?'out':''}">${TL(gtAlac)}</b></div>
+ <div class="box"><small>Vadesi geçmiş borç</small><b class="${gtBorc?'out':''}">${TL(gtBorc)}</b></div>
  <div class="box"><small>Kasa/banka (giriş − çıkış)</small><b>${TL(gi-cik)}</b></div>
  <div class="box"><small>Portföydeki alınan çek/senet</small><b>${TL(cp.filter(c=>c.yon==='Alınan').reduce((a,c)=>a+c.tutar,0))}</b></div></div>
- <h2>Vadesi geçen faturalar</h2>${G.length?`<div class="tw"><table>${G.slice(0,10).map(x=>`<tr class="k" onclick="faturaGor('${x.f.id}')"><td>${E(cAd(x.f.cari))}</td><td>${E(x.f.no)}</td><td><span class="tag w">${x.g} gün gecikti</span></td><td class="n out">${TL(x.k)}</td></tr>`).join('')}</table></div>`:'<div class="box empty">Vadesi geçmiş alacak yok.</div>'}
+ <h2>Vadesi geçen faturalar</h2>${G.length?`<div class="tw"><table><tr><th>Cari</th><th>Tür</th><th>No</th><th>Gecikme</th><th class="n">Kalan</th></tr>${G.slice(0,10).map(x=>`<tr class="k" onclick="faturaGor('${x.f.id}')"><td>${E(cAd(x.f.cari))}</td><td>${faturaTuru(x.f)}</td><td>${E(x.f.no)}</td><td><span class="tag w">${x.g} gün gecikti</span></td><td class="n out">${TL(x.k)}</td></tr>`).join('')}</table></div>`:'<div class="box empty">Vadesi geçen fatura yok.</div>'}
  <h2 style="margin-top:16px">Vadesi 7 gün içinde veya geçmiş çek/senet</h2>${yak.length?`<div class="tw"><table>${yak.map(c=>`<tr class="k" onclick="tab='cek';render()"><td>${c.tur} · ${E(c.yon)}</td><td>${E(cAd(c.cari))}</td><td>${tar(c.vade)} ${c.vade<bugun()?'<span class="tag w">vadesi geçti</span>':''}</td><td class="n">${TL(c.tutar)}</td></tr>`).join('')}</table></div>`:'<div class="box empty">Yaklaşan çek/senet vadesi yok.</div>'}
  <h2 style="margin-top:16px">Asgari stoğa inen ürünler</h2>${S.urun.filter(u=>u.min>0&&stokDurum(u.id)<=u.min).length?`<div class="tw"><table>${S.urun.filter(u=>u.min>0&&stokDurum(u.id)<=u.min).map(u=>`<tr class="k" onclick="tab='urun';render()"><td>${E(u.kod)} ${E(u.ad)}</td><td class="n"><span class="tag w">${stokDurum(u.id)} ${E(u.birim)}</span></td></tr>`).join('')}</table></div>`:'<div class="box empty">Stok uyarısı yok.</div>'}`;}
 function cari(){const l=S.cari.filter(c=>(c.ad+c.tel+c.vno).toLowerCase().includes(ara.toLowerCase()));const G=geciken(),gm={};G.forEach(x=>gm[x.f.cari]=Math.max(gm[x.f.cari]||0,x.g));
  return `<div class="bar"><input placeholder="Cari ara…" value="${E(ara)}" oninput="ara=this.value;aramaYenile(this)"><button class="btn" onclick="cariForm()">Yeni cari</button></div>
  <div class="tw">${l.length?`<table><tr><th>Ünvan</th><th>Telefon</th><th>Vergi no</th><th></th><th class="n">Bakiye</th></tr>${l.map(c=>{const b=bakiye(c.id);return `<tr class="k" onclick="cariAc('${c.id}')"><td>${E(c.ad)}</td><td>${E(c.tel)}</td><td>${E(c.vno)}</td><td>${gm[c.id]?`<span class="tag w">${gm[c.id]} gün gecikme</span>`:''}</td><td class="n ${b>0?'out':'in'}">${TL(b)}</td></tr>`}).join('')}</table>`:'<div class="empty">Cari bulunamadı. “Yeni cari” ile müşteri ekleyin.</div>'}</div>`;}
 function aramaYenile(i){const p=i.selectionStart;render();const n=$('.bar input');n.focus();n.setSelectionRange(p,p);}
-function fatura(){const K=kalanlar();const l=[...S.fatura].filter(f=>(f.no+cAd(f.cari)).toLowerCase().includes(ara.toLowerCase())).sort((a,b)=>b.tarih.localeCompare(a.tarih));
+function fatura(){const K=kalanlar(),q=ara.toLowerCase();const l=[...S.fatura].filter(f=>(ff==='tumu'||faturaTip(f)===ff)&&(f.no+cAd(f.cari)).toLowerCase().includes(q)).sort((a,b)=>b.tarih.localeCompare(a.tarih));
+ const satis=S.fatura.filter(f=>faturaTip(f)==='satis'),alis=S.fatura.filter(f=>faturaTip(f)==='alis');
  const dur=f=>K[f.id]<0.005?'<span class="tag">Ödendi</span>':(f.vade&&f.vade<bugun()?`<span class="tag w">${gunFark(f.vade)} gün gecikti</span>`:'<span class="tag">Açık</span>');
- return `<div class="bar"><input placeholder="Fatura no / cari ara…" value="${E(ara)}" oninput="ara=this.value;aramaYenile(this)"><button class="btn" onclick="faturaForm()">Yeni fatura</button></div>
- <div class="tw">${l.length?`<table><tr><th>No</th><th>Tarih</th><th>Cari</th><th>Vade</th><th>Durum</th><th class="n">Toplam</th><th class="n">Kalan</th></tr>${l.map(f=>`<tr class="k" onclick="faturaGor('${f.id}')"><td>${E(f.no)}${f.ekId?' 📎':''}</td><td>${tar(f.tarih)}</td><td>${E(cAd(f.cari))}</td><td>${tar(f.vade)}</td><td>${dur(f)}</td><td class="n">${TL(f.toplam)}</td><td class="n">${TL(K[f.id])}</td></tr>`).join('')}</table>`:'<div class="empty">Fatura yok. “Yeni fatura” ile ilk faturayı girin.</div>'}</div>`;}
+ return `<div class="bar"><input placeholder="Fatura no / cari ara…" value="${E(ara)}" oninput="ara=this.value;aramaYenile(this)"><select aria-label="Fatura türüne göre filtrele" onchange="ff=this.value;render()">${[['tumu','Tüm faturalar'],['satis','Satış faturaları'],['alis','Alış faturaları']].map(([v,l])=>`<option value="${v}" ${ff===v?'selected':''}>${l}</option>`).join('')}</select><button class="btn" onclick="faturaForm()">Yeni fatura</button></div>
+ <div class="grid"><div class="box"><small>Satış faturaları · ${satis.length} kayıt</small><b>${TL(satis.reduce((a,f)=>a+f.toplam,0))}</b></div><div class="box"><small>Alış faturaları · ${alis.length} kayıt</small><b>${TL(alis.reduce((a,f)=>a+f.toplam,0))}</b></div></div>
+ <div class="tw">${l.length?`<table><tr><th>No</th><th>Tür</th><th>Tarih</th><th>Cari</th><th>Vade</th><th>Durum</th><th class="n">Toplam</th><th class="n">Kalan</th></tr>${l.map(f=>`<tr class="k" onclick="faturaGor('${f.id}')"><td>${E(f.no)}${f.ekId?' 📎':''}</td><td><span class="tag">${faturaTuru(f)}</span></td><td>${tar(f.tarih)}</td><td>${E(cAd(f.cari))}</td><td>${tar(f.vade)}</td><td>${dur(f)}</td><td class="n">${TL(f.toplam)}</td><td class="n">${TL(K[f.id])}</td></tr>`).join('')}</table>`:'<div class="empty">Bu filtrede fatura yok. “Yeni fatura” ile kayıt ekleyin.</div>'}</div>`;}
 function kasa(){const l=S.hareket.filter(h=>!fy||h.yontem===fy).sort((a,b)=>b.tarih.localeCompare(a.tarih));
  return `<div class="bar"><button class="btn" onclick="hareketForm('giris')">+ Tahsilat (giriş)</button><button class="btn g" onclick="hareketForm('cikis')">+ Ödeme (çıkış)</button><select onchange="fy=this.value;render()"><option value="">Tüm yöntemler</option>${YONT.map(y=>`<option ${y===fy?'selected':''}>${y}</option>`).join('')}</select></div>
  <div class="tw">${l.length?`<table><tr><th>Tarih</th><th>Tür</th><th>Cari</th><th>Yöntem</th><th>Açıklama</th><th class="n">Tutar</th><th></th></tr>${l.map(h=>`<tr><td>${tar(h.tarih)}</td><td><span class="tag">${h.tip==='giris'?'Giriş':'Çıkış'}</span></td><td>${E(cAd(h.cari))}</td><td>${E(h.yontem)}</td><td>${E(h.aciklama)}</td><td class="n ${h.tip==='giris'?'in':'out'}">${h.tip==='giris'?'+':'−'}${TL(h.tutar)}</td><td><button class="btn d" onclick="hareketSil('${h.id}')">Sil</button></td></tr>`).join('')}</table>`:'<div class="empty">Hareket yok. Tahsilat veya ödeme girerek başlayın.</div>'}</div>`;}
@@ -146,9 +154,9 @@ function cekDurum(id,d){const c=S.cek.find(x=>x.id===id),h='c_'+id;
  if(d==='Tahsil/Ödendi')put('hareket',{id:h,tip:c.yon==='Alınan'?'giris':'cikis',cari:c.cari,tarih:bugun(),tutar:c.tutar,yontem:c.tur,aciklama:c.tur+' '+c.no});else del('hareket',h);
  put('cek',{...c,durum:d});render();}
 function cekSil(id){if(!confirm('Kayıt silinsin mi? Bağlı kasa hareketi de silinir.'))return;del('hareket','c_'+id);del('cek',id);render();}
-function stokDurum(id){return S.stok.filter(x=>x.urun===id).reduce((a,x)=>a+x.miktar,0)-S.fatura.reduce((a,f)=>a+f.kalem.filter(k=>k.u===id).reduce((b,k)=>b+k.m,0),0);}
+function stokDurum(id){const faturaStogu=S.fatura.reduce((a,f)=>a+(faturaTip(f)==='alis'?1:-1)*f.kalem.filter(k=>k.u===id).reduce((b,k)=>b+k.m,0),0);return S.stok.filter(x=>x.urun===id).reduce((a,x)=>a+x.miktar,0)+faturaStogu;}
 function urun(){const st=[...S.stok].sort((a,b)=>b.tarih.localeCompare(a.tarih)).slice(0,10);
- return `<div class="bar"><button class="btn" onclick="urunForm()">Yeni ürün</button><button class="btn g" onclick="stokForm()">Stok girişi</button><span style="color:var(--mu);font-size:13px">Stok = girişler − faturalanan miktar</span></div>
+ return `<div class="bar"><button class="btn" onclick="urunForm()">Yeni ürün</button><button class="btn g" onclick="stokForm()">Stok girişi</button><span style="color:var(--mu);font-size:13px">Stok = girişler + alış faturaları − satış faturaları</span></div>
  <div class="tw">${S.urun.length?`<table><tr><th>Kod</th><th>Ürün</th><th>Birim</th><th class="n">Liste fiyatı</th><th class="n">Stok</th></tr>${[...S.urun].sort((a,b)=>a.kod.localeCompare(b.kod)).map(u=>{const k=stokDurum(u.id);return `<tr class="k" onclick="urunForm('${u.id}')"><td>${E(u.kod)}</td><td>${E(u.ad)}</td><td>${E(u.birim)}</td><td class="n">${TL(u.fiyat)}</td><td class="n">${k} ${k<0?'<span class="tag w">eksi</span>':u.min>0&&k<=u.min?'<span class="tag w">düşük</span>':''}</td></tr>`}).join('')}</table>`:'<div class="empty">Ürün listesi boş. Profil kodlarınızı birim fiyatıyla ekleyin.</div>'}</div>
  <h2 style="margin-top:16px">Son stok girişleri</h2><div class="tw">${st.length?`<table>${st.map(x=>{const u=S.urun.find(p=>p.id===x.urun)||{kod:'?',ad:''};return `<tr><td>${tar(x.tarih)}</td><td>${E(u.kod)} ${E(u.ad)}</td><td class="n ${x.miktar<0?'out':'in'}">${x.miktar>0?'+':''}${x.miktar}</td><td>${E(x.not)}</td><td><button class="btn d" onclick="del('stok','${x.id}');render()">Sil</button></td></tr>`}).join('')}</table>`:'<div class="empty">Henüz stok girişi yok.</div>'}</div>`;}
 function urunForm(id){const u=S.urun.find(x=>x.id===id)||{kod:'',ad:'',birim:'mt',fiyat:'',min:''};
@@ -179,9 +187,9 @@ function teklifGor(id){const t=S.teklif.find(x=>x.id===id),c=S.cari.find(x=>x.id
  <div class="bar noprint" style="margin-top:12px"><select style="width:auto" onchange="teklifDurum('${id}',this.value)">${['Açık','Onaylandı','Faturalandı','İptal'].map(d=>`<option ${d===t.durum?'selected':''}>${d}</option>`).join('')}</select>
  ${t.durum!=='Faturalandı'?`<button class="btn" onclick="teklifFatura('${id}')">Faturaya dönüştür</button>`:''}<button class="btn g" onclick="window.print()">Yazdır / PDF</button><button class="btn g" onclick="kapat()">Kapat</button><button class="btn d" onclick="del('teklif','${id}');kapat();render()">Sil</button></div>`);}
 function teklifDurum(id,d){put('teklif',{...S.teklif.find(x=>x.id===id),durum:d});render();}
-function teklifFatura(id){const t=S.teklif.find(x=>x.id===id);put('fatura',{id:uid(),cari:t.cari,no:'F-'+new Date().getFullYear()+'-'+String(S.fatura.length+1).padStart(4,'0'),tarih:bugun(),vade:gunEkle(30),kalem:t.kalem,kdv:t.kdv,toplam:t.toplam});put('teklif',{...t,durum:'Faturalandı'});kapat();tab='fatura';render();}
+function teklifFatura(id){const t=S.teklif.find(x=>x.id===id);put('fatura',{id:uid(),tip:'satis',cari:t.cari,no:faturaNo('satis'),tarih:bugun(),vade:gunEkle(30),kalem:t.kalem,kdv:t.kdv,toplam:t.toplam});put('teklif',{...t,durum:'Faturalandı'});kapat();tab='fatura';render();}
 function ekstreMetin(id){const c=S.cari.find(x=>x.id===id),r=ekstre(id);return 'CARİ EKSTRESİ\n'+c.ad+'\nTarih: '+tar(bugun())+'\n\n'+r.map(x=>tar(x.t)+' | '+x.a+' | '+TL(x.b)+' | Bakiye: '+TL(x.k)).join('\n')+'\n\nGüncel bakiye: '+TL(bakiye(id));}
-function ekstrePaylas(id){ac(`<h2>Ekstreyi müşteriye gönder</h2><textarea id="et" rows="12" readonly>${E(ekstreMetin(id))}</textarea><div class="bar" style="margin-top:10px"><button class="btn" onclick="kopyala()">Metni kopyala</button>${navigator.share?`<button class="btn g" onclick="navigator.share({title:'Cari ekstresi',text:$('#et').value}).catch(()=>{})">Paylaş</button>`:''}<button class="btn g" onclick="cariAc('${id}')">Geri</button></div>`);}
+function ekstrePaylas(id){ac(`<h2>Cari ekstresini paylaş</h2><textarea id="et" rows="12" readonly>${E(ekstreMetin(id))}</textarea><div class="bar" style="margin-top:10px"><button class="btn" onclick="kopyala()">Metni kopyala</button>${navigator.share?`<button class="btn g" onclick="navigator.share({title:'Cari ekstresi',text:$('#et').value}).catch(()=>{})">Paylaş</button>`:''}<button class="btn g" onclick="cariAc('${id}')">Geri</button></div>`);}
 function kopyala(){const t=$('#et');t.select();try{navigator.clipboard.writeText(t.value).catch(()=>document.execCommand('copy'))}catch(e){document.execCommand('copy')}}
 function akis(){const Y=YONT.concat(S.hareket.map(h=>h.yontem)).filter((y,i,a)=>a.indexOf(y)===i&&S.hareket.some(h=>h.yontem===y));
  if(!Y.length)return '<div class="box empty">Nakit akışı için tahsilat veya ödeme girin.</div>';
@@ -198,16 +206,15 @@ function cariForm(){ac(`<h2>Yeni cari</h2><label>Ünvan<input id="a"></label><di
 function cariKaydet(){const a=$('#a').value.trim();if(!a){$('#a').focus();return}put('cari',{id:uid(),ad:a,tel:$('#t').value,vno:$('#v').value,adres:$('#d').value});kapat();render();}
 function cariAc(id){const c=S.cari.find(x=>x.id===id),r=ekstre(id),b=bakiye(id);
  ac(`<h2>${E(c.ad)}</h2><p style="color:var(--mu);margin:0 0 10px">${E(c.tel)} ${E(c.vno)} ${E(c.adres||'')}</p>
- <div class="box" style="margin-bottom:12px"><small>Güncel bakiye</small><b class="${b>0?'out':'in'}">${TL(b)}</b> <small>${b>0?'müşteri bize borçlu':b<0?'biz müşteriye borçluyuz':'hesap kapalı'}</small></div>
- <div class="bar noprint"><button class="btn" onclick="hareketForm('giris','${id}')">Tahsilat gir</button><button class="btn g" onclick="faturaForm('${id}')">Fatura kes</button><button class="btn d" onclick="cariSil('${id}')">Cariyi sil</button></div>
+ <div class="box" style="margin-bottom:12px"><small>Güncel bakiye</small><b class="${b>0?'out':'in'}">${TL(b)}</b> <small>${b>0?'cari bize borçlu':b<0?'biz cariye borçluyuz':'hesap kapalı'}</small></div>
+ <div class="bar noprint"><button class="btn" onclick="hareketForm('giris','${id}')">Tahsilat gir</button><button class="btn g" onclick="hareketForm('cikis','${id}')">Ödeme gir</button><button class="btn g" onclick="faturaForm('${id}')">Fatura ekle</button><button class="btn d" onclick="cariSil('${id}')">Cariyi sil</button></div>
  <div class="tw">${r.length?`<table><tr><th>Tarih</th><th>İşlem</th><th class="n">Tutar</th><th class="n">Bakiye</th></tr>${r.map(x=>`<tr ${x.fid?`class="k" onclick="faturaGor('${x.fid}')"`:''}><td>${tar(x.t)}</td><td>${E(x.a)}</td><td class="n ${x.b<0?'in':''}">${TL(x.b)}</td><td class="n">${TL(x.k)}</td></tr>`).join('')}</table>`:'<div class="empty">Bu cariye ait hareket yok.</div>'}</div>
- <div class="bar noprint" style="margin-top:12px"><button class="btn g" onclick="window.print()">Ekstre yazdır</button><button class="btn" onclick="ekstrePaylas('${id}')">Müşteriye gönder</button><button class="btn g" onclick="kapat()">Kapat</button></div>`);}
+ <div class="bar noprint" style="margin-top:12px"><button class="btn g" onclick="window.print()">Ekstre yazdır</button><button class="btn" onclick="ekstrePaylas('${id}')">Ekstreyi paylaş</button><button class="btn g" onclick="kapat()">Kapat</button></div>`);}
 function cariSil(id){if(!confirm('Cari, faturaları, hareketleri ve çek/senetleri silinsin mi?'))return;['fatura','hareket','cek','teklif'].forEach(c=>S[c].filter(x=>x.cari===id).forEach(x=>del(c,x.id)));del('cari',id);kapat();render();}
 const copt=s=>S.cari.map(c=>`<option value="${c.id}" ${c.id===s?'selected':''}>${E(c.ad)}</option>`).join('');
 function faturaForm(sec){if(!S.cari.length){ac('<div class="empty">Önce bir cari ekleyin.</div><div class="bar"><button class="btn" onclick="cariForm()">Yeni cari</button></div>');return}
- const no='F-'+new Date().getFullYear()+'-'+String(S.fatura.length+1).padStart(4,'0');
- ac(`<h2>Yeni fatura</h2><datalist id="ul">${S.urun.map(u=>`<option value="${E(u.kod+' – '+u.ad)}">`).join('')}</datalist><div class="row2"><label>Cari<select id="fc">${copt(sec)}</select></label><label>Fatura no<input id="fn" value="${no}"></label>
- <label>Tarih<input type="date" id="ft" value="${bugun()}"></label><label>Vade tarihi<input type="date" id="fv" value="${gunEkle(30)}"></label></div>
+ ac(`<h2>Yeni fatura</h2><datalist id="ul">${S.urun.map(u=>`<option value="${E(u.kod+' – '+u.ad)}">`).join('')}</datalist><div class="row2"><label>Fatura türü<select id="ftp" onchange="$('#fn').value=faturaNo(this.value)"><option value="satis">Satış faturası</option><option value="alis">Alış faturası</option></select></label><label>Cari<select id="fc">${copt(sec)}</select></label><label>Fatura no<input id="fn" value="${faturaNo('satis')}"></label>
+ <label>Tarih<input type="date" id="ft" value="${bugun()}"></label><label>Vade tarihi<input type="date" id="fv" value="${gunEkle(30)}"></label></div><small style="display:block;color:var(--mu);margin:8px 0 12px">Satış faturası alacak oluşturur ve stoktan düşer; alış faturası borç oluşturur ve stoğa eklenir.</small>
  <div id="kl"></div><button class="btn g" onclick="kalemEkle()">+ Kalem ekle</button>
  <div class="row2" style="margin-top:12px"><label>KDV %<input type="number" id="kdv" value="20" oninput="topla()"></label><div class="box"><small>Genel toplam</small><b id="gt">0,00 SOM</b></div></div>
  <div class="bar"><button class="btn" onclick="faturaKaydet()">Faturayı kaydet</button><button class="btn g" onclick="kapat()">Vazgeç</button></div>`);kalemEkle();}
@@ -217,12 +224,12 @@ function kalemler(){return [...document.querySelectorAll('.kal')].map(r=>({ad:r.
 function toplamlar(k,kdv){const a=k.reduce((s,x)=>s+x.m*x.f,0);return {ara:a,kdv:a*kdv/100,top:a*(1+kdv/100)}}
 function topla(){$('#gt').textContent=TL(toplamlar(kalemler(),+$('#kdv').value||0).top)}
 function faturaKaydet(){const k=kalemler();if(!k.length){alert('En az bir kalem için miktar ve fiyat girin.');return}const kdv=+$('#kdv').value||0;
- put('fatura',{id:uid(),cari:$('#fc').value,no:$('#fn').value,tarih:$('#ft').value||bugun(),vade:$('#fv').value,kalem:k,kdv,toplam:toplamlar(k,kdv).top});kapat();render();raporGonder('fatura',S.fatura[S.fatura.length-1]);}
-function faturaGor(id){const f=S.fatura.find(x=>x.id===id),c=S.cari.find(x=>x.id===f.cari)||{},t=toplamlar(f.kalem,f.kdv),kal=kalanlar()[id];
+ const f={id:uid(),tip:$('#ftp').value,cari:$('#fc').value,no:$('#fn').value,tarih:$('#ft').value||bugun(),vade:$('#fv').value,kalem:k,kdv,toplam:toplamlar(k,kdv).top};put('fatura',f);kapat();render();raporGonder('fatura',f);}
+function faturaGor(id){const f=S.fatura.find(x=>x.id===id),ft=faturaTip(f),c=S.cari.find(x=>x.id===f.cari)||{},t=toplamlar(f.kalem,f.kdv),kal=kalanlar()[id];
  const ek=f.ekId?(/^image\//.test(f.ekTip)?`<a href="/api/dosya?id=${f.ekId}" target="_blank"><img src="/api/dosya?id=${f.ekId}" alt="Fatura belgesi" style="max-width:100%;border-radius:6px"></a>`:`<a href="/api/dosya?id=${f.ekId}" target="_blank">📎 ${E(f.ekAd)} dosyasını aç</a>`):'<span style="color:var(--mu)">Ekli belge yok.</span>';
- ac(`<h2>Fatura ${E(f.no)}</h2><p style="margin:0 0 10px">${E(c.ad)}<br><span style="color:var(--mu)">${E(c.vno||'')} ${E(c.adres||'')}</span><br>Tarih: ${tar(f.tarih)} ${f.vade?' · Vade: '+tar(f.vade):''}</p>
+ ac(`<h2>${ft==='alis'?'Alış':'Satış'} faturası ${E(f.no)}</h2><p style="margin:0 0 10px">${E(c.ad)}<br><span style="color:var(--mu)">${E(c.vno||'')} ${E(c.adres||'')}</span><br>Tarih: ${tar(f.tarih)} ${f.vade?' · Vade: '+tar(f.vade):''}</p>
  <div class="tw"><table><tr><th>Ürün</th><th class="n">Miktar</th><th class="n">Birim fiyat</th><th class="n">Tutar</th></tr>${f.kalem.map(k=>`<tr><td>${E(k.ad)}</td><td class="n">${k.m} ${E(k.b||'')}</td><td class="n">${TL(k.f)}</td><td class="n">${TL(k.m*k.f)}</td></tr>`).join('')}
- <tr><td colspan="3" class="n">Ara toplam</td><td class="n">${TL(t.ara)}</td></tr><tr><td colspan="3" class="n">KDV %${f.kdv}</td><td class="n">${TL(t.kdv)}</td></tr><tr><td colspan="3" class="n"><b>Genel toplam</b></td><td class="n"><b>${TL(t.top)}</b></td></tr><tr class="noprint"><td colspan="3" class="n">Kalan borç</td><td class="n out">${TL(kal)}</td></tr></table></div>
+ <tr><td colspan="3" class="n">Ara toplam</td><td class="n">${TL(t.ara)}</td></tr><tr><td colspan="3" class="n">KDV %${f.kdv}</td><td class="n">${TL(t.kdv)}</td></tr><tr><td colspan="3" class="n"><b>Genel toplam</b></td><td class="n"><b>${TL(t.top)}</b></td></tr><tr class="noprint"><td colspan="3" class="n">${ft==='alis'?'Kalan borç':'Kalan alacak'}</td><td class="n out">${TL(kal)}</td></tr></table></div>
  <div class="noprint" style="margin-top:12px"><h2>Fatura belgesi (PDF / fotoğraf)</h2>${ek}
  <div class="bar" style="margin-top:8px">${AS?`<button class="btn g" onclick="$('#ef').click()">${f.ekId?'Belgeyi değiştir':'Belge yükle'}</button><input type="file" id="ef" accept="application/pdf,image/*" hidden onchange="ekYukle('${id}',this)">${f.ekId?`<button class="btn d" onclick="ekKaldir('${id}')">Belgeyi kaldır</button>`:''}`:''}</div></div>
  <div class="bar noprint" style="margin-top:12px"><button class="btn" onclick="window.print()">Yazdır / PDF</button><button class="btn g" onclick="kapat()">Kapat</button><button class="btn d" onclick="faturaSil('${id}')">Faturayı sil</button></div>`);}
@@ -244,7 +251,7 @@ function raporAyar(){const a=ray();ac(`<h2>Rapor e-postası</h2><label>Raporlar�
  <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="ra" style="width:auto" ${a.acik!==false?'checked':''}> Her fatura ve tahsilat/ödeme kaydından sonra raporu otomatik gönder</label>
  <div class="bar"><button class="btn" onclick="put('ayar',{id:'rapor',mail:$('#rm').value.trim(),acik:$('#ra').checked});kapat()">Kaydet</button><button class="btn g" onclick="kapat()">Vazgeç</button></div>`);}
 function raporMetin(t,o){const c=S.cari.find(x=>x.id===o.cari),ad=c?c.ad:'Genel (carisiz)';let konu,g;
- if(t==='fatura'){konu='Yeni fatura '+o.no+' – '+ad;g='YENİ FATURA\nFatura no: '+o.no+'\nCari: '+ad+'\nTarih: '+tar(o.tarih)+(o.vade?'\nVade: '+tar(o.vade):'')+'\n\n'+o.kalem.map(k=>'• '+k.ad+': '+k.m+' '+(k.b||'')+' × '+TL(k.f)).join('\n')+'\n\nKDV %'+o.kdv+' dahil toplam: '+TL(o.toplam);}
+ if(t==='fatura'){const alis=faturaTip(o)==='alis';konu='Yeni '+(alis?'alış':'satış')+' faturası '+o.no+' – '+ad;g='YENİ '+(alis?'ALIŞ':'SATIŞ')+' FATURASI\nFatura no: '+o.no+'\nCari: '+ad+'\nTarih: '+tar(o.tarih)+(o.vade?'\nVade: '+tar(o.vade):'')+'\n\n'+o.kalem.map(k=>'• '+k.ad+': '+k.m+' '+(k.b||'')+' × '+TL(k.f)).join('\n')+'\n\nKDV %'+o.kdv+' dahil toplam: '+TL(o.toplam);}
  else{const gi=o.tip==='giris';konu=(gi?'Tahsilat':'Ödeme')+' kaydı – '+ad+' – '+TL(o.tutar);g=(gi?'TAHSİLAT (GİRİŞ)':'ÖDEME (ÇIKIŞ)')+'\nCari: '+ad+'\nTarih: '+tar(o.tarih)+'\nYöntem: '+o.yontem+'\nTutar: '+TL(o.tutar)+(o.aciklama?'\nAçıklama: '+o.aciklama:'');}
  if(c)g+='\n\nCari güncel bakiye: '+TL(bakiye(c.id));
  const G=S.hareket.filter(h=>h.tip==='giris').reduce((a,h)=>a+h.tutar,0),C=S.hareket.filter(h=>h.tip==='cikis').reduce((a,h)=>a+h.tutar,0);
@@ -271,9 +278,9 @@ function raporPdf(t,o){const W=1190,H=1684,cv=document.createElement('canvas');c
  const c=S.cari.find(x=>x.id===o.cari),ad=c?c.ad:'Genel (carisiz)',F='Arial,Helvetica,sans-serif';let y=110;
  const T=(s,x,yy,sz,b,al,mw)=>{g.font=(b?'bold ':'')+sz+'px '+F;g.textAlign=al||'left';g.fillStyle='#17212b';g.fillText(String(s),x,yy,mw)};
  const L=yy=>{g.fillStyle='#d5dce3';g.fillRect(80,yy,W-160,2)};
- T('PVC Profil · '+(t==='fatura'?'Fatura raporu':o.tip==='giris'?'Tahsilat makbuzu':'Ödeme kaydı'),80,y,46,true);y+=56;
+ T('PVC Profil · '+(t==='fatura'?(faturaTip(o)==='alis'?'Alış faturası':'Satış faturası'):o.tip==='giris'?'Tahsilat makbuzu':'Ödeme kaydı'),80,y,46,true);y+=56;
  T('Rapor tarihi: '+tar(bugun()),80,y,26);y+=62;T('Cari: '+ad,80,y,34,true);y+=56;
- if(t==='fatura'){const tp=toplamlar(o.kalem,o.kdv);T('Fatura no: '+o.no,80,y,28);T('Tarih: '+tar(o.tarih),560,y,28);if(o.vade)T('Vade: '+tar(o.vade),860,y,28);y+=50;L(y);y+=40;
+ if(t==='fatura'){const tp=toplamlar(o.kalem,o.kdv);T('Tür: '+faturaTuru(o)+' faturası',80,y,28);y+=42;T('Fatura no: '+o.no,80,y,28);T('Tarih: '+tar(o.tarih),560,y,28);if(o.vade)T('Vade: '+tar(o.vade),860,y,28);y+=50;L(y);y+=40;
   T('Ürün',80,y,24,true);T('Miktar',700,y,24,true,'right');T('Birim fiyat',900,y,24,true,'right');T('Tutar',W-80,y,24,true,'right');y+=14;L(y);y+=40;
   o.kalem.slice(0,22).forEach(k=>{T(k.ad,80,y,26,false,'left',560);T(k.m+' '+(k.b||''),700,y,26,false,'right');T(TL(k.f),900,y,26,false,'right');T(TL(k.m*k.f),W-80,y,26,false,'right');y+=44});
   L(y);y+=44;T('Ara toplam',900,y,26,false,'right');T(TL(tp.ara),W-80,y,26,false,'right');y+=42;T('KDV %'+o.kdv,900,y,26,false,'right');T(TL(tp.kdv),W-80,y,26,false,'right');y+=52;T('Genel toplam',900,y,32,true,'right');T(TL(tp.top),W-80,y,32,true,'right');y+=70;
@@ -286,7 +293,7 @@ function toast(m,ms){let d=$('#ts');if(!d){d=document.createElement('div');d.id=
 async function raporGonder(t,o){const a=ray();if(!o||a.acik===false)return;const to=(a.mail||'').split(',').map(x=>x.trim()).filter(Boolean);if(!to.length)return;
  const r=raporMetin(t,o);toast('Rapor PDF olarak gönderiliyor…',20000);
  try{const mcp=window.claude&&await claude.use('mcp');if(!mcp)throw new Error('E-posta bağlantısı yok');
-  const fn=(t==='fatura'?'fatura-'+o.no:'tahsilat-'+o.tarih+'-'+String(o.id).slice(0,4)).replace(/[^\w.-]/g,'_')+'.pdf';
+  const fn=(t==='fatura'?(faturaTip(o)==='alis'?'alis-fatura-':'satis-fatura-')+o.no:'tahsilat-'+o.tarih+'-'+String(o.id).slice(0,4)).replace(/[^\w.-]/g,'_')+'.pdf';
   await mcp.callTool('Gmail','send_message',{to,subject:r.konu,body:r.govde+'\n\n(PDF ekte)',attachments:[{filename:fn,mimeType:'application/pdf',content:raporPdf(t,o)}]});
   toast('Rapor gönderildi: '+to.join(', '))}
  catch(e){toast('Otomatik gönderim yapılamadı: '+(e.message||e.code||'hata'),6000);raporSor(t,o)}}
