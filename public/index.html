@@ -87,7 +87,8 @@ const YONT_H=['Nakit','Banka R','Banka GR','Havale/EFT','Kredi kartı'],YONT=[..
 let S={cari:[],fatura:[],hareket:[],urun:[],cek:[],stok:[],teklif:[],ayar:[]},tab='ozet',ara='',fy='',DB=null,AS=null;
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 function lsave(){if(DB)return;try{localStorage.setItem('pvc_cari',JSON.stringify(S))}catch(e){}}
-function put(c,o){const i=S[c].findIndex(x=>x.id===o.id);i<0?S[c].push(o):S[c][i]=o;if(DB)DB.collection(c).doc(o.id).set(o).catch(()=>alert('Kayıt yapılamadı. Yazma yetkiniz olmayabilir.'));else lsave();}
+function kayitHatasi(e){const m=String(e?.message||'');if(m==='Giriş gerekli')return 'Oturum doğrulanamadı. Açılan giriş penceresinden tekrar giriş yapın; kayıt kaydedilmedi.';if(/noperm|permission|read.?only/i.test(m))return 'Veritabanı yazma iznini reddetti. Vercel ortamındaki Upstash yazma tokenını kontrol edin.';return m?`Kayıt kaydedilemedi: ${m}`:'Kayıt kaydedilemedi. Lütfen tekrar deneyin.';}
+function put(c,o){const i=S[c].findIndex(x=>x.id===o.id);i<0?S[c].push(o):S[c][i]=o;if(DB)DB.collection(c).doc(o.id).set(o).catch(e=>{alert(kayitHatasi(e));cek()});else lsave();}
 function del(c,id){S[c]=S[c].filter(x=>x.id!==id);if(DB)DB.collection(c).doc(id).delete().catch(()=>{});else lsave();}
 async function baslat(){
  try{if(window.claude){DB=await claude.use('db');AS=await claude.use('assets')}}catch(e){}
